@@ -253,22 +253,25 @@ module Sensu
       Transport.connect(transport_name, transport_settings) do |connection|
         @transport = connection
 
-        # Stop on all errors: This is a heavy solution for reconnect issues seen after network errors
+        # Die on all errors: This is a heavy solution for reconnect issues seen after network errors
         # The failure mode is, after a transient network issue, Sensu does not properly reconnect to
         # the transport causing false keepalives and requiring manual intervention.  Stop on all errors
         # so that an external supervisor can completely restart the process, resetting any bad state.
+        # stop can get hung and not exit, so call exit! to die hard
+        # As Sensu events are a constant and recurring stream it's better to just hard drop work and come
+        #    back clean instead of getting stuck trying to finish work.
         @transport.on_error do |error|
           @logger.error("transport connection error", :error => error.to_s)
-          stop
+          exit!
         end
 
         @transport.before_reconnect do
           @logger.error('transport connection error, failing instead of reconnecting')
-          stop
+          exit!
         end
         @transport.after_reconnect do
           @logger.error('transport connection error, failing instead of reconnecting')
-          stop
+          exit!
         end
 
         yield(@transport) if block_given?
@@ -296,19 +299,22 @@ module Sensu
         # so that an external supervisor can completely restart the process, resetting any bad state.
         # Stopping on Redis errors as well as Redis errors generally happen at the same time transport
         # fails.
+        # stop can get hung and not exit, so call exit! to die hard
+        # As Sensu events are a constant and recurring stream it's better to just hard drop work and come
+        #    back clean instead of getting stuck trying to finish work.
         @redis.on_error do |error|
           @logger.error("redis connection error", :error => error.to_s)
-          stop
+          exit!
         end
 
         @redis.before_reconnect do
           @logger.error('redis connection error, failing instead of reconnecting')
-          stop
+          exit!
         end
 
         @redis.after_reconnect do
           @logger.error('redis connection error, failing instead of reconnecting')
-          stop
+          exit!
         end          
 
         yield(@redis) if block_given?
