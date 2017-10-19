@@ -252,24 +252,25 @@ module Sensu
       Transport.logger = @logger
       Transport.connect(transport_name, transport_settings) do |connection|
         @transport = connection
+
+        # Stop on all errors: This is a heavy solution for reconnect issues seen after network errors
+        # The failure mode is, after a transient network issue, Sensu does not properly reconnect to
+        # the transport causing false keepalives and requiring manual intervention.  Stop on all errors
+        # so that an external supervisor can completely restart the process, resetting any bad state.
         @transport.on_error do |error|
           @logger.error("transport connection error", :error => error.to_s)
-          if @settings[:transport][:reconnect_on_error]
-            @transport.reconnect
-          else
-            stop
-          end
+          stop
         end
+
         @transport.before_reconnect do
-          unless testing?
-            @logger.warn("reconnecting to transport")
-            pause
-          end
+          @logger.error('transport connection error, failing instead of reconnecting')
+          stop
         end
         @transport.after_reconnect do
-          @logger.info("reconnected to transport")
-          resume
+          @logger.error('transport connection error, failing instead of reconnecting')
+          stop
         end
+
         yield(@transport) if block_given?
       end
     end
@@ -288,19 +289,28 @@ module Sensu
       @logger.debug("connecting to redis", :settings => @settings[:redis])
       Redis.connect(@settings[:redis]) do |connection|
         @redis = connection
+
+        # Stop on all errors: This is a heavy solution for reconnect issues seen after network errors
+        # The failure mode is, after a transient network issue, Sensu does not properly reconnect to
+        # the transport causing false keepalives and requiring manual intervention.  Stop on all errors
+        # so that an external supervisor can completely restart the process, resetting any bad state.
+        # Stopping on Redis errors as well as Redis errors generally happen at the same time transport
+        # fails.
         @redis.on_error do |error|
           @logger.error("redis connection error", :error => error.to_s)
+          stop
         end
+
         @redis.before_reconnect do
-          unless testing?
-            @logger.warn("reconnecting to redis")
-            pause
-          end
+          @logger.error('redis connection error, failing instead of reconnecting')
+          stop
         end
+
         @redis.after_reconnect do
-          @logger.info("reconnected to redis")
-          resume
-        end
+          @logger.error('redis connection error, failing instead of reconnecting')
+          stop
+        end          
+
         yield(@redis) if block_given?
       end
     end
